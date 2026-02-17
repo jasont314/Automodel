@@ -45,6 +45,7 @@ from nemo_automodel.shared.import_utils import safe_import
 from nemo_automodel.shared.utils import dtype_from_str
 
 HAS_LIGER_KERNEL, liger_kernel_trf = safe_import("liger_kernel.transformers")
+HAS_LIGER_MONKEY_PATCH, liger_kernel_monkey_patch = safe_import("liger_kernel.transformers.monkey_patch")
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,11 @@ def _patch_liger_kernel(model):
         logging.warning("Asked to use Liger Kernel, but could not import")
         return model
 
+    model_type = getattr(getattr(model, "config", None), "model_type", None)
+
+    if model_type == "nemotron_h":
+        return _patch_liger_kernel_nemotron_h(model)
+
     try:
         liger_kernel_trf._apply_liger_kernel_to_instance(model=model)
         logging.info("Applied liger-kernel to model")
@@ -127,6 +133,46 @@ def _patch_liger_kernel(model):
         logging.warning("Failed to apply liger-kernels to model; falling back to eager")
         del model
         raise RuntimeError("Failed to patch model")
+
+
+def _patch_liger_kernel_nemotron_h(model):
+    """
+    Apply a minimal, model-safe Liger patching path for NemotronH.
+
+    Upstream liger-kernel does not currently expose an official nemotron_h
+    model adapter, but we can still patch compatible pieces:
+      - RMSNorm module forward path
+      - CE loss class referenced by modeling_nemotron_h
+    """
+    if not HAS_LIGER_MONKEY_PATCH:
+        logging.warning("Liger monkey_patch module is unavailable; skipping NemotronH-specific Liger patch")
+        return model
+
+    enable_rmsnorm = os.getenv("NEMOTRONH_LIGER_RMSNORM", "1") == "1"
+    enable_ce = os.getenv("NEMOTRONH_LIGER_CE", "1") == "1"
+
+    patched_rmsnorm = 0
+    if enable_rmsnorm:
+        for module in model.modules():
+            # NemotronH norm blocks expose `weight` + `variance_epsilon` and are
+            # compatible with the generic Liger RMSNorm patch helper.
+            if module.__class__.__name__ == "NemotronHRMSNorm":
+                liger_kernel_monkey_patch._patch_rms_norm_module(module, in_place=False)
+                patched_rmsnorm += 1
+
+    patched_ce = False
+    if enable_ce and hasattr(liger_kernel_trf, "LigerCrossEntropyLoss"):
+        model_mod = inspect.getmodule(model.__class__)
+        if model_mod is not None and hasattr(model_mod, "CrossEntropyLoss"):
+            setattr(model_mod, "CrossEntropyLoss", liger_kernel_trf.LigerCrossEntropyLoss)
+            patched_ce = True
+
+    logging.info(
+        "Applied NemotronH-specific Liger patch (rmsnorm=%s, ce=%s)",
+        patched_rmsnorm,
+        patched_ce,
+    )
+    return model
 
 
 def _get_next_fallback_attn(attn_implementation: str) -> str:
