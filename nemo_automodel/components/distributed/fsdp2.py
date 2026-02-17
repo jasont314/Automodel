@@ -182,8 +182,8 @@ class FSDP2Manager:
             total_parallel_ranks = self.tp_size * self.cp_size * self.pp_size
             if self.world_size % total_parallel_ranks != 0:
                 raise ValueError(
-                    f"world_size ({self.world_size}) must be divisible by (tp_size * cp_size) "
-                    f"({self.tp_size} * {self.cp_size} = {total_parallel_ranks})"
+                    f"world_size ({self.world_size}) must be divisible by (tp_size * cp_size * pp_size) "
+                    f"({self.tp_size} * {self.cp_size} * {self.pp_size} = {total_parallel_ranks})"
                 )
             self.dp_size = self.world_size // total_parallel_ranks
 
@@ -311,6 +311,7 @@ class FSDP2Manager:
         fsdp2_strategy_parallelize(
             model,
             device_mesh=self.device_mesh,
+            moe_mesh=self.moe_mesh,
             mp_policy=self.mp_policy,
             tp_shard_plan=tp_shard_plan,
             offload_policy=self.offload_policy,

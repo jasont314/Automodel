@@ -375,7 +375,7 @@ class TrainBiencoderRecipe(BaseRecipe):
                 pp_batch_size=pp_batch_size,
                 pp_microbatch_size=pp_microbatch_size,
                 patch_stage_backward_maybe_with_nosync=self.cfg.get("model.backend.enable_fsdp_optimizations", False),
-                device=torch.cuda.current_device(),
+                device=torch.device("cuda", torch.cuda.current_device()),
             )
             assert isinstance(autopipeline, AutoPipeline), (
                 f"autopipeline {autopipeline.__class__} is not an instance of AutoPipeline"
